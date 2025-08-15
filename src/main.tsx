@@ -57,6 +57,9 @@ class VoiceICRApp {
   private allHeardSounds: string[] = [];
   private unifiedTimeout: number = 0;
   private recognitionStartTime: number = 0;
+  private activeOscillators: OscillatorNode[] = [];
+  private morseTimeout: number = 0;
+  private firstFinalResultTime: number = 0;
   private characterTimings: { [char: string]: number[] } = {};
   private morseWPM: number = 20;
   private isPlayingMorse: boolean = false;
@@ -355,6 +358,9 @@ class VoiceICRApp {
     const morsePattern = this.morseCode[character];
     if (!morsePattern) return;
     
+    // Clear any existing oscillators and timeouts
+    this.stopAllMorseAudio();
+    
     this.isPlayingMorse = true;
     this.audioStartTime = Date.now();
     
@@ -380,6 +386,9 @@ class VoiceICRApp {
       oscillator.frequency.value = frequency;
       oscillator.type = 'sine';
       
+      // Track oscillator for potential stopping
+      this.activeOscillators.push(oscillator);
+      
       // Envelope to avoid clicks
       gainNode.gain.setValueAtTime(0, currentTime);
       gainNode.gain.linearRampToValueAtTime(0.3, currentTime + 0.005);
@@ -389,11 +398,19 @@ class VoiceICRApp {
       oscillator.start(currentTime);
       oscillator.stop(currentTime + duration);
       
+      // Remove from tracking when it ends
+      oscillator.addEventListener('ended', () => {
+        const index = this.activeOscillators.indexOf(oscillator);
+        if (index > -1) {
+          this.activeOscillators.splice(index, 1);
+        }
+      });
+      
       currentTime += duration + (elementGap / 1000);
     }
     
     // Set audio end time and automatically start voice recognition
-    setTimeout(() => {
+    this.morseTimeout = window.setTimeout(() => {
       this.audioEndTime = Date.now();
       this.responseStartTime = Date.now();
       this.isPlayingMorse = false;
@@ -402,6 +419,28 @@ class VoiceICRApp {
       // Automatically start voice recognition
       this.startListening();
     }, (currentTime - this.audioContext.currentTime) * 1000);
+  }
+
+  private stopAllMorseAudio(): void {
+    // Stop all active oscillators immediately
+    this.activeOscillators.forEach(oscillator => {
+      try {
+        oscillator.stop();
+        oscillator.disconnect();
+      } catch (e) {
+        // Oscillator might already be stopped
+      }
+    });
+    this.activeOscillators = [];
+    
+    // Clear morse timeout
+    if (this.morseTimeout) {
+      clearTimeout(this.morseTimeout);
+      this.morseTimeout = 0;
+    }
+    
+    this.isPlayingMorse = false;
+    console.log('🔇 All Morse audio stopped immediately');
   }
 
   private initializeSpeechRecognition(): void {
@@ -541,32 +580,52 @@ class VoiceICRApp {
       
       console.log('Transcript:', transcript, 'Confidence:', confidence, 'Final:', isFinal);
       
-      // Add ALL sounds (interim and final) to our analysis
+      // Add sounds to analysis
       this.allHeardSounds.push(transcript);
       console.log(`📊 Total sounds collected: ${this.allHeardSounds.length}`);
-      
-      // Reset unified timeout on any new input
-      if (this.unifiedTimeout) {
-        clearTimeout(this.unifiedTimeout);
-      }
-      
-      // Start unified timeout (6 seconds for comprehensive analysis)
-      this.unifiedTimeout = window.setTimeout(() => {
-        this.processUnifiedResult();
-      }, 6000);
       
       if (isFinal) {
         console.log(`✅ Final result received: "${transcript}"`);
         
-        // If this is a good final result and we don't have too many sounds yet, process immediately
-        if (this.allHeardSounds.length <= 3) {
-          clearTimeout(this.unifiedTimeout);
-          setTimeout(() => this.processUnifiedResult(), 1000); // Short delay for any additional results
+        // Record timing from FIRST final result only
+        if (this.firstFinalResultTime === 0) {
+          this.firstFinalResultTime = Date.now() - this.recognitionStartTime;
+          console.log(`⏱️ First final result timing: ${(this.firstFinalResultTime/1000).toFixed(1)}s`);
         }
         
         const currentMicLevel = this.avgVolumeHistory.length > 0 ? 
           this.avgVolumeHistory[this.avgVolumeHistory.length - 1] : 0;
         this.elements.transcription.textContent = `✅ Final: "${transcript}" (${Math.round(confidence * 100)}%, mic: ${currentMicLevel.toFixed(1)}%)`;
+        
+        // Check if answer is correct immediately
+        const normalizedAnswer = this.normalizeAnswer(transcript, this.currentCharacter);
+        const isCorrect = this.checkAnswer(transcript);
+        
+        if (isCorrect) {
+          console.log('🎯 CORRECT answer detected immediately!');
+          // Clear any existing timeouts
+          if (this.unifiedTimeout) {
+            clearTimeout(this.unifiedTimeout);
+            this.unifiedTimeout = 0;
+          }
+          
+          // Process correct answer immediately with minimal delay (allow quick self-correction)
+          setTimeout(() => {
+            if (this.isListening) { // Only if still listening
+              console.log('🚀 Processing correct answer immediately');
+              this.processUnifiedResult();
+            }
+          }, 800); // Very short delay - 0.8 seconds for potential self-correction
+        } else {
+          console.log('❌ Incorrect answer, allowing user to continue/correct');
+          // For wrong answers, give more time for self-correction
+          if (this.unifiedTimeout) {
+            clearTimeout(this.unifiedTimeout);
+          }
+          this.unifiedTimeout = window.setTimeout(() => {
+            this.processUnifiedResult();
+          }, 3000); // 3 seconds for self-correction
+        }
       } else {
         // Show interim results - this indicates speech is being detected
         const currentMicLevel = this.avgVolumeHistory.length > 0 ? 
@@ -574,6 +633,15 @@ class VoiceICRApp {
         console.log(`🎤 Speech detected! Interim: "${transcript}", mic level: ${currentMicLevel.toFixed(1)}%`);
         
         this.elements.transcription.textContent = `🎤 Hearing: "${transcript}" (interim, mic: ${currentMicLevel.toFixed(1)}%)`;
+        
+        // Set fallback timeout for interim results that never finalize
+        if (this.unifiedTimeout) {
+          clearTimeout(this.unifiedTimeout);
+        }
+        this.unifiedTimeout = window.setTimeout(() => {
+          console.log('⏰ Timeout reached - processing interim results');
+          this.processUnifiedResult();
+        }, 4000); // 4 seconds fallback for stuck interim results
       }
     };
 
@@ -835,6 +903,7 @@ class VoiceICRApp {
       this.allHeardSounds = [];
       this.responseStartTime = Date.now();
       this.recognitionStartTime = Date.now();
+      this.firstFinalResultTime = 0;
       
       // Clear any existing timeouts
       if (this.confirmationTimeout) {
@@ -992,15 +1061,19 @@ class VoiceICRApp {
     
     // Analyze all heard sounds to determine best answer
     const bestAnswer = this.analyzeAllHeardSounds();
-    const responseTime = Date.now() - this.recognitionStartTime;
     
-    console.log(`🎯 Final analysis result: "${bestAnswer}" (from ${this.allHeardSounds.length} sounds in ${(responseTime/1000).toFixed(1)}s)`);
+    // Use first final result timing, or total time if no final result
+    const responseTime = this.firstFinalResultTime > 0 ? 
+      this.firstFinalResultTime : 
+      (Date.now() - this.recognitionStartTime);
+    
+    console.log(`🎯 Final analysis result: "${bestAnswer}" (from ${this.allHeardSounds.length} sounds, first result: ${(responseTime/1000).toFixed(1)}s)`);
     
     // Display comprehensive result
     this.elements.transcription.innerHTML = 
       `🧠 Smart Analysis: "${bestAnswer}"<br>` +
       `📊 From sounds: [${this.allHeardSounds.slice(0, 5).join(', ')}${this.allHeardSounds.length > 5 ? '...' : ''}]<br>` +
-      `⏱️ Response time: ${(responseTime/1000).toFixed(1)}s`;
+      `⏱️ First result time: ${(responseTime/1000).toFixed(1)}s`;
     
     // Process the result
     this.totalAttempts++;
@@ -1014,12 +1087,12 @@ class VoiceICRApp {
     if (isCorrect) {
       this.score++;
       this.characterTimings[this.currentCharacter].push(responseTime);
-      this.elements.status.textContent = `🧠 Smart: Correct! (${(responseTime/1000).toFixed(1)}s)`;
+      this.elements.status.textContent = `🧠 Correct! (${(responseTime/1000).toFixed(1)}s)`;
       this.elements.status.className = 'correct';
       this.playCorrectSound();
     } else {
       this.characterTimings[this.currentCharacter] = [];
-      this.elements.status.textContent = `🧠 Smart: Incorrect. Expected: ${this.currentCharacter} - Progress reset!`;
+      this.elements.status.textContent = `🧠 Incorrect. Expected: ${this.currentCharacter} - Progress reset!`;
       this.elements.status.className = 'incorrect';
       this.playIncorrectSound();
     }
@@ -1494,13 +1567,28 @@ class VoiceICRApp {
   }
 
   public stopTraining(): void {
-    // Stop any ongoing recognition
+    console.log('🛑 Stop training called - immediate stop');
+    
+    // IMMEDIATELY stop all audio and recognition
+    this.stopAllMorseAudio();
     this.stopListening();
     
-    // Clear any timeouts
+    // Clear ALL timeouts
     if (this.confirmationTimeout) {
       clearTimeout(this.confirmationTimeout);
       this.confirmationTimeout = 0;
+    }
+    if (this.unifiedTimeout) {
+      clearTimeout(this.unifiedTimeout);
+      this.unifiedTimeout = 0;
+    }
+    if (this.interimTimeout) {
+      clearTimeout(this.interimTimeout);
+      this.interimTimeout = 0;
+    }
+    if (this.morseTimeout) {
+      clearTimeout(this.morseTimeout);
+      this.morseTimeout = 0;
     }
     
     // Reset UI to initial state
@@ -1508,18 +1596,21 @@ class VoiceICRApp {
     this.elements.stopButton.style.display = 'none';
     this.elements.replayButton.style.display = 'none';
     this.elements.skipButton.style.display = 'none';
-    this.elements.status.textContent = 'Training stopped. Click "Start Training" to begin again.';
+    this.elements.status.textContent = 'Training stopped immediately.';
     this.elements.status.className = '';
     this.elements.transcription.textContent = '';
     this.elements.currentChar.textContent = '?';
     
-    // Reset confirmation state
+    // Reset ALL state
     this.hasReceivedFirstResult = false;
     this.firstResponseTime = 0;
+    this.firstFinalResultTime = 0;
     this.confirmationResults = [];
+    this.allHeardSounds = [];
     this.responseStartTime = 0;
+    this.recognitionStartTime = 0;
     
-    this.playCorrectSound(); // Gentle feedback that stopping worked
+    console.log('🛑 Training stopped immediately with full cleanup');
   }
 
   public skipCurrentCharacter(): void {
