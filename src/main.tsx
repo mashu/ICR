@@ -492,10 +492,12 @@ class VoiceICRApp {
       // Some browsers support these additional settings
       (this.recognition as any).soundStart = true;
       (this.recognition as any).soundEnd = true;
-      // Reduce silence timeout to be more responsive to short utterances
-      (this.recognition as any).speechTimeout = 3000; // 3 seconds
-      (this.recognition as any).speechTimeoutEarly = 1000; // 1 second early timeout
-      console.log('- Sound indicators and timeouts configured');
+      // More aggressive timeouts for single letter recognition
+      (this.recognition as any).speechTimeout = 5000; // 5 seconds total timeout
+      (this.recognition as any).speechTimeoutEarly = 1500; // 1.5 second early timeout for short speech
+      (this.recognition as any).maxSpeechLength = 10000; // 10 seconds max speech length
+      (this.recognition as any).speechStartTimeout = 8000; // 8 seconds to start speaking
+      console.log('- Sound indicators and timeouts configured for single letters');
     } catch (e) {
       console.log('- Advanced settings not supported');
     }
@@ -508,6 +510,11 @@ class VoiceICRApp {
       this.elements.voiceButton.classList.add('listening');
       this.elements.status.textContent = 'Listening for your answer...';
       this.playStartSound();
+      
+      // Log initial microphone state
+      const currentMicLevel = this.avgVolumeHistory.length > 0 ? 
+        this.avgVolumeHistory[this.avgVolumeHistory.length - 1] : 0;
+      console.log(`Speech recognition started. Current mic level: ${currentMicLevel.toFixed(1)}%`);
     };
 
     this.recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -585,11 +592,15 @@ class VoiceICRApp {
           }
         }
       } else {
-        // Show interim results
+        // Show interim results - this indicates speech is being detected
+        const currentMicLevel = this.avgVolumeHistory.length > 0 ? 
+          this.avgVolumeHistory[this.avgVolumeHistory.length - 1] : 0;
+        console.log(`🎤 Speech detected! Interim: "${transcript}", mic level: ${currentMicLevel.toFixed(1)}%`);
+        
         if (!this.hasReceivedFirstResult) {
-          this.elements.transcription.textContent = `Hearing: "${transcript}" (interim)`;
+          this.elements.transcription.textContent = `🎤 Hearing: "${transcript}" (interim, mic: ${currentMicLevel.toFixed(1)}%)`;
         } else {
-          this.elements.transcription.innerHTML += `<br>Hearing: "${transcript}" (interim)`;
+          this.elements.transcription.innerHTML += `<br>🎤 Hearing: "${transcript}" (interim, mic: ${currentMicLevel.toFixed(1)}%)`;
         }
       }
     };
@@ -598,6 +609,10 @@ class VoiceICRApp {
       console.error('Speech recognition error:', event.error, event.message);
       console.log('Error event details:', event);
       
+      // Get current microphone level for diagnostics
+      const currentMicLevel = this.avgVolumeHistory.length > 0 ? 
+        this.avgVolumeHistory[this.avgVolumeHistory.length - 1] : 0;
+      
       let errorMessage = 'Speech recognition error: ';
       
       switch (event.error) {
@@ -605,7 +620,8 @@ class VoiceICRApp {
           errorMessage += 'Microphone permission denied. Please allow microphone access.';
           break;
         case 'no-speech':
-          errorMessage += 'No speech detected. Try speaking louder or closer to the microphone.';
+          errorMessage += `No speech detected. Mic level: ${currentMicLevel.toFixed(1)}%. Try speaking louder or closer to the microphone.`;
+          console.log(`No speech detected despite mic activity. Current mic level: ${currentMicLevel.toFixed(1)}%, avg mic level: ${this.avgVolumeHistory.length > 0 ? (this.avgVolumeHistory.reduce((a,b) => a+b) / this.avgVolumeHistory.length).toFixed(1) : 0}%`);
           break;
         case 'audio-capture':
           errorMessage += 'Microphone not found or not working.';
