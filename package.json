@@ -1,0 +1,16 @@
+{
+  "name": "voice-icr-practice",
+  "version": "1.0.0",
+  "description": "Voice-enabled ICR practice application",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && cp src/index.html dist/ && cp src/style.css dist/",
+    "dev": "tsc --watch",
+    "serve": "python -m http.server 8000 --directory dist",
+    "serve-https": "node serve-https.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {}
+}

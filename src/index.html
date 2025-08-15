@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice ICR Practice</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Koch Method Morse Trainer</h1>
+            <p class="subtitle">Progressive Morse Code Learning with Voice Recognition</p>
+        </header>
+
+        <div class="setup-section">
+            <div class="form-group">
+                <label for="student-name">Student Name or Call Sign:</label>
+                <input type="text" id="student-name" placeholder="Enter your name or call sign">
+            </div>
+
+            <div class="form-group">
+                <label for="character-set">Koch Method Lesson:</label>
+                <select id="character-set">
+                    <option value="koch1">Lesson 1: K, M</option>
+                    <option value="koch2">Lesson 2: K, M, U, R</option>
+                    <option value="koch3">Lesson 3: K, M, U, R, S, N</option>
+                    <option value="koch4">Lesson 4: + A, P</option>
+                    <option value="koch5">Lesson 5: + T, L</option>
+                    <option value="koch6">Lesson 6: + O, W</option>
+                    <option value="koch7">Lesson 7: + I, J</option>
+                    <option value="koch8">Lesson 8: + Z, =</option>
+                    <option value="koch9">Lesson 9: + F, Y</option>
+                    <option value="koch10">Lesson 10: + V, H</option>
+                    <option value="alphabet">Review: All Letters</option>
+                    <option value="numbers">Numbers (0-9)</option>
+                    <option value="custom">Custom Characters</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="morse-wpm">Morse Code Speed (WPM):</label>
+                <input type="range" id="morse-wpm" min="5" max="40" value="20">
+                <span id="wpm-display">20 WPM</span>
+            </div>
+
+            <div class="form-group">
+                <label for="custom-characters">Custom Characters:</label>
+                <input type="text" id="custom-characters" placeholder="Enter custom characters (e.g., AEIOU)" disabled>
+            </div>
+        </div>
+
+        <div class="practice-section">
+            <div class="character-display">
+                <div class="current-character-label">Listen to the Morse Code:</div>
+                <div id="current-character" class="current-character">?</div>
+                <button id="start-button" class="start-button">🎯 Start Training</button>
+                <button id="stop-button" class="stop-button" style="display:none;">⏹️ Stop Training</button>
+                <button id="replay-button" class="replay-button" style="display:none;">🔊 Replay</button>
+                <button id="skip-button" class="skip-button" style="display:none;">⏭️ Skip (if mic fails)</button>
+            </div>
+
+            <div class="input-section">
+                            <div class="voice-input">
+                <button id="voice-button" class="voice-button">Manual Voice Input</button>
+                <div class="voice-hint">Auto-listening enabled | Manual: Click or Ctrl+Space</div>
+                <div class="voice-tip">💡 Tip: Say letters clearly (e.g., "Em" for M, "Kay" for K) or use phonetic alphabet</div>
+                
+                                    <div class="mic-activity" id="mic-activity">
+                        <div class="mic-label">🎤 Microphone Level: <span class="gain-indicator" id="gain-indicator">Auto-Gain Active</span></div>
+                        <div class="mic-level-container">
+                            <div class="mic-level-bar" id="mic-level-bar"></div>
+                        </div>
+                        <div class="mic-controls">
+                            <label class="gain-control">
+                                <input type="checkbox" id="auto-gain-toggle"> Auto-Gain
+                            </label>
+                            <label class="gain-control">
+                                Speed: <input type="range" id="gain-speed" min="500" max="5000" value="2000" step="500">
+                                <span id="gain-speed-display">2.0s</span>
+                            </label>
+                        </div>
+                        <div class="mic-guide">🟢 Green = Optimal | 🟡 Yellow = Speak Louder | 🔴 Red = Too Loud | ⚫ Gray = Too Quiet</div>
+                        <div class="agc-warning">⚠️ <strong>Note:</strong> Auto-Gain may reduce speech recognition accuracy. Disable if experiencing recognition issues.</div>
+                    </div>
+            </div>
+
+                <div class="text-input-group">
+                    <input type="text" id="text-input" placeholder="Type your answer or use voice" autocomplete="off">
+                    <button id="submit-button" class="submit-button">Submit</button>
+                </div>
+            </div>
+
+            <div id="transcription" class="transcription"></div>
+            <div id="status" class="status">Ready to start</div>
+            
+            <div class="timing-chart">
+                <h4>Character Timing Progress</h4>
+                <div class="timing-legend">
+                    <span class="legend-item"><span class="legend-color" style="background:#28a745;"></span>Green (&lt;2s)</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#ffc107;"></span>Yellow (2-3s)</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#fd7e14;"></span>Orange (3-4s)</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#dc3545;"></span>Red (&gt;4s)</span>
+                </div>
+                <div id="timing-bars" class="timing-bars"></div>
+                <div class="lesson-goal">🎯 Goal: Get all characters to Green level to pass lesson!</div>
+            </div>
+        </div>
+
+        <div class="stats-section">
+            <div id="score" class="score">Score: 0/0 (0%)</div>
+            <div class="controls">
+                <button onclick="resetApp()" class="reset-button">Reset</button>
+                <button onclick="testAudio()" class="test-button">Test Audio</button>
+                <button onclick="testMicrophone()" class="test-button">Test Microphone</button>
+                <button onclick="testSpeechRecognition()" class="test-button">Test Speech Recognition</button>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h3>Koch Method Training Instructions:</h3>
+            <ul>
+                <li><strong>Automatic Flow:</strong> App plays Morse code → automatically starts listening → processes your response → moves to next character</li>
+                <li><strong>Just Speak:</strong> Simply say the character you heard immediately after the code finishes</li>
+                <li><strong>Timing:</strong> Response time is measured from when the code finishes playing</li>
+                <li><strong>Progress:</strong> When all characters average < 500ms response time, the lesson is complete</li>
+                <li><strong>Manual Options:</strong> If auto-voice fails, use the voice button or type your answer</li>
+                <li><strong>Koch Method:</strong> Start with Lesson 1 (K, M) and progress sequentially</li>
+                <li><strong>Replay:</strong> Click the 🔊 button to hear the code again</li>
+            </ul>
+        </div>
+
+        <div class="browser-support">
+            <p><strong>Browser Support:</strong> This application requires a modern browser with Web Speech API support (Chrome, Edge, Safari).</p>
+            <p><strong>Troubleshooting:</strong> If you hear no sound or microphone doesn't work:</p>
+            <ul>
+                <li>Make sure your browser allows microphone access (check the lock icon in the address bar)</li>
+                <li>Use the "Test Audio" and "Test Microphone" buttons to diagnose issues</li>
+                <li>Try refreshing the page if permissions were denied initially</li>
+                <li>For HTTPS sites: ensure your connection is secure</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="main.js"></script>
+    <script>
+        // Enable custom character input when custom option is selected
+        document.getElementById('character-set').addEventListener('change', function() {
+            const customInput = document.getElementById('custom-characters');
+            if (this.value === 'custom') {
+                customInput.disabled = false;
+                customInput.focus();
+            } else {
+                customInput.disabled = true;
+            }
+        });
+    </script>
+</body>
+</html>
