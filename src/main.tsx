@@ -51,6 +51,12 @@ class VoiceICRApp {
   private hasReceivedFirstResult: boolean = false;
   private confirmationResults: string[] = [];
   private confirmationTimeout: number = 0;
+  private lastInterimTime: number = 0;
+  private lastInterimText: string = '';
+  private interimTimeout: number = 0;
+  private allHeardSounds: string[] = [];
+  private unifiedTimeout: number = 0;
+  private recognitionStartTime: number = 0;
   private characterTimings: { [char: string]: number[] } = {};
   private morseWPM: number = 20;
   private isPlayingMorse: boolean = false;
@@ -535,90 +541,39 @@ class VoiceICRApp {
       
       console.log('Transcript:', transcript, 'Confidence:', confidence, 'Final:', isFinal);
       
+      // Add ALL sounds (interim and final) to our analysis
+      this.allHeardSounds.push(transcript);
+      console.log(`📊 Total sounds collected: ${this.allHeardSounds.length}`);
+      
+      // Reset unified timeout on any new input
+      if (this.unifiedTimeout) {
+        clearTimeout(this.unifiedTimeout);
+      }
+      
+      // Start unified timeout (6 seconds for comprehensive analysis)
+      this.unifiedTimeout = window.setTimeout(() => {
+        this.processUnifiedResult();
+      }, 6000);
+      
       if (isFinal) {
-        // Process final results with context
-        const normalizedAnswer = this.normalizeAnswer(transcript, this.currentCharacter);
-        const showConversion = normalizedAnswer !== transcript;
+        console.log(`✅ Final result received: "${transcript}"`);
         
-        if (!this.hasReceivedFirstResult) {
-          // First result - record timing and process answer
-          this.firstResponseTime = Date.now() - this.responseStartTime;
-          this.hasReceivedFirstResult = true;
-          
-          if (showConversion) {
-            this.elements.transcription.textContent = `First: "${transcript}" → "${normalizedAnswer}" (${Math.round(confidence * 100)}% confidence, ${(this.firstResponseTime/1000).toFixed(1)}s)`;
-          } else {
-            this.elements.transcription.textContent = `First: "${transcript}" (${Math.round(confidence * 100)}% confidence, ${(this.firstResponseTime/1000).toFixed(1)}s)`;
-          }
-          
-          this.confirmationResults.push(normalizedAnswer);
-          this.processAnswer(transcript, this.firstResponseTime);
-          
-          // Continue listening for confirmation in continuous mode
-          this.elements.status.textContent = 'Say the letter again to confirm...';
-          
-          // Set timeout for confirmation (5 seconds - shorter for better responsiveness)
-          this.confirmationTimeout = window.setTimeout(() => {
-            if (this.hasReceivedFirstResult && this.confirmationResults.length >= 1) {
-              const firstResult = this.confirmationResults[0];
-              this.elements.transcription.innerHTML += `<br><em>⏱️ Timeout - using first result: ${firstResult}</em>`;
-              console.log('⏱️ Confirmation timeout - proceeding with first result');
-              this.stopListening();
-            }
-          }, 5000);
-        } else {
-          // Subsequent results - for confirmation only (reprocess with context)
-          const confirmedAnswer = this.normalizeAnswer(transcript, this.currentCharacter);
-          this.confirmationResults.push(confirmedAnswer);
-          
-          const showConfirmConversion = confirmedAnswer !== transcript;
-          if (showConfirmConversion) {
-            this.elements.transcription.textContent += `<br>Confirm: "${transcript}" → "${confirmedAnswer}" (${Math.round(confidence * 100)}% confidence)`;
-          } else {
-            this.elements.transcription.textContent += `<br>Confirm: "${transcript}" (${Math.round(confidence * 100)}% confidence)`;
-          }
-          
-          // Check if we have consistent results (with limits for rapid speech)
-          console.log(`📊 Confirmation status: ${this.confirmationResults.length} results so far`);
-          
-          if (this.confirmationResults.length >= 2) {
-            const firstResult = this.confirmationResults[0];
-            const confirmedResults = this.confirmationResults.filter(r => r === firstResult);
-            
-            if (confirmedResults.length >= 2) {
-              this.elements.transcription.innerHTML += `<br><strong>✓ Confirmed: ${firstResult}</strong>`;
-              clearTimeout(this.confirmationTimeout);
-              console.log('🎯 Confirmation achieved - stopping listening');
-              this.stopListening();
-            } else if (this.confirmationResults.length >= 3) {
-              // Too many different results, stop and use first one
-              this.elements.transcription.innerHTML += `<br><em>Using first result: ${firstResult}</em>`;
-              clearTimeout(this.confirmationTimeout);
-              console.log('🚫 Too many conflicts - using first result');
-              this.stopListening();
-            }
-          }
-          
-          // Safety limit: if we get too many rapid confirmations, stop
-          if (this.confirmationResults.length >= 5) {
-            const firstResult = this.confirmationResults[0];
-            this.elements.transcription.innerHTML += `<br><em>⚡ Rapid speech detected - using first result: ${firstResult}</em>`;
-            clearTimeout(this.confirmationTimeout);
-            console.log('⚡ Rapid speech limit reached - stopping');
-            this.stopListening();
-          }
+        // If this is a good final result and we don't have too many sounds yet, process immediately
+        if (this.allHeardSounds.length <= 3) {
+          clearTimeout(this.unifiedTimeout);
+          setTimeout(() => this.processUnifiedResult(), 1000); // Short delay for any additional results
         }
+        
+        const currentMicLevel = this.avgVolumeHistory.length > 0 ? 
+          this.avgVolumeHistory[this.avgVolumeHistory.length - 1] : 0;
+        this.elements.transcription.textContent = `✅ Final: "${transcript}" (${Math.round(confidence * 100)}%, mic: ${currentMicLevel.toFixed(1)}%)`;
       } else {
         // Show interim results - this indicates speech is being detected
         const currentMicLevel = this.avgVolumeHistory.length > 0 ? 
           this.avgVolumeHistory[this.avgVolumeHistory.length - 1] : 0;
         console.log(`🎤 Speech detected! Interim: "${transcript}", mic level: ${currentMicLevel.toFixed(1)}%`);
         
-        if (!this.hasReceivedFirstResult) {
-          this.elements.transcription.textContent = `🎤 Hearing: "${transcript}" (interim, mic: ${currentMicLevel.toFixed(1)}%)`;
-        } else {
-          this.elements.transcription.innerHTML += `<br>🎤 Hearing: "${transcript}" (interim, mic: ${currentMicLevel.toFixed(1)}%)`;
-        }
+        this.elements.transcription.textContent = `🎤 Hearing: "${transcript}" (interim, mic: ${currentMicLevel.toFixed(1)}%)`;
       }
     };
 
@@ -726,6 +681,8 @@ class VoiceICRApp {
       }
     };
   }
+
+
 
   private setupEventListeners(): void {
     this.elements.voiceButton.addEventListener('click', () => {
@@ -872,12 +829,28 @@ class VoiceICRApp {
         this.audioContext.resume();
       }
       
-      // Reset confirmation state for new recognition session
+      // Reset ALL recognition state for new session
       this.hasReceivedFirstResult = false;
       this.confirmationResults = [];
+      this.allHeardSounds = [];
       this.responseStartTime = Date.now();
+      this.recognitionStartTime = Date.now();
       
-      console.log('Starting speech recognition');
+      // Clear any existing timeouts
+      if (this.confirmationTimeout) {
+        clearTimeout(this.confirmationTimeout);
+        this.confirmationTimeout = 0;
+      }
+      if (this.interimTimeout) {
+        clearTimeout(this.interimTimeout);
+        this.interimTimeout = 0;
+      }
+      if (this.unifiedTimeout) {
+        clearTimeout(this.unifiedTimeout);
+        this.unifiedTimeout = 0;
+      }
+      
+      console.log('Starting speech recognition with unified system');
       this.isRecognitionStarting = true;
       this.recognition.start();
       
@@ -906,12 +879,22 @@ class VoiceICRApp {
 
   private stopListening(): void {
     console.log('stopListening called, isListening:', this.isListening);
-    console.log('Confirmation results:', this.confirmationResults.length);
+    console.log('All heard sounds:', this.allHeardSounds.length);
     
-    // Clear confirmation timeout
+    // Clear ALL timeouts to prevent conflicts
     if (this.confirmationTimeout) {
       clearTimeout(this.confirmationTimeout);
       this.confirmationTimeout = 0;
+    }
+    
+    if (this.interimTimeout) {
+      clearTimeout(this.interimTimeout);
+      this.interimTimeout = 0;
+    }
+    
+    if (this.unifiedTimeout) {
+      clearTimeout(this.unifiedTimeout);
+      this.unifiedTimeout = 0;
     }
     
     if (this.recognition && this.isListening) {
@@ -930,8 +913,8 @@ class VoiceICRApp {
     this.elements.voiceButton.textContent = 'Start Voice Input';
     this.elements.voiceButton.classList.remove('listening');
     
-    // Schedule next character after stopping
-    if (this.hasReceivedFirstResult) {
+    // Schedule next character after stopping (if we processed something)
+    if (this.allHeardSounds.length > 0 || this.hasReceivedFirstResult) {
       console.log('🎯 Recognition stopped - moving to next character');
       setTimeout(() => {
         this.nextCharacter();
@@ -996,13 +979,112 @@ class VoiceICRApp {
     }, 1500);
   }
 
+  private processUnifiedResult(): void {
+    console.log('🎯 Processing unified result after timeout or early completion');
+    
+    if (this.allHeardSounds.length === 0) {
+      console.log('🚫 No sounds heard - timeout without input');
+      this.elements.transcription.textContent = '🔇 No speech detected - please try again';
+      this.elements.status.textContent = 'No speech detected. Try speaking louder.';
+      this.stopListening();
+      return;
+    }
+    
+    // Analyze all heard sounds to determine best answer
+    const bestAnswer = this.analyzeAllHeardSounds();
+    const responseTime = Date.now() - this.recognitionStartTime;
+    
+    console.log(`🎯 Final analysis result: "${bestAnswer}" (from ${this.allHeardSounds.length} sounds in ${(responseTime/1000).toFixed(1)}s)`);
+    
+    // Display comprehensive result
+    this.elements.transcription.innerHTML = 
+      `🧠 Smart Analysis: "${bestAnswer}"<br>` +
+      `📊 From sounds: [${this.allHeardSounds.slice(0, 5).join(', ')}${this.allHeardSounds.length > 5 ? '...' : ''}]<br>` +
+      `⏱️ Response time: ${(responseTime/1000).toFixed(1)}s`;
+    
+    // Process the result
+    this.totalAttempts++;
+    const isCorrect = this.checkAnswer(bestAnswer);
+    
+    // Initialize timing array for this character if needed
+    if (!this.characterTimings[this.currentCharacter]) {
+      this.characterTimings[this.currentCharacter] = [];
+    }
+    
+    if (isCorrect) {
+      this.score++;
+      this.characterTimings[this.currentCharacter].push(responseTime);
+      this.elements.status.textContent = `🧠 Smart: Correct! (${(responseTime/1000).toFixed(1)}s)`;
+      this.elements.status.className = 'correct';
+      this.playCorrectSound();
+    } else {
+      this.characterTimings[this.currentCharacter] = [];
+      this.elements.status.textContent = `🧠 Smart: Incorrect. Expected: ${this.currentCharacter} - Progress reset!`;
+      this.elements.status.className = 'incorrect';
+      this.playIncorrectSound();
+    }
+    
+    this.updateScore();
+    this.updateTimingDisplay();
+    
+    // Stop listening and move to next character
+    this.stopListening();
+  }
+
+  private analyzeAllHeardSounds(): string {
+    console.log(`🧠 Analyzing all heard sounds: [${this.allHeardSounds.join(', ')}]`);
+    
+    if (this.allHeardSounds.length === 0) {
+      console.log('🧠 No sounds heard, returning empty');
+      return '';
+    }
+    
+    // Normalize all heard sounds
+    const normalizedSounds = this.allHeardSounds.map(sound => 
+      this.normalizeAnswer(sound, this.currentCharacter)
+    );
+    
+    console.log(`🧠 Normalized sounds: [${normalizedSounds.join(', ')}]`);
+    
+    // Count frequency of each normalized result
+    const frequency: { [key: string]: number } = {};
+    normalizedSounds.forEach(sound => {
+      frequency[sound] = (frequency[sound] || 0) + 1;
+    });
+    
+    console.log('🧠 Frequency analysis:', frequency);
+    
+    // Find the most common result
+    let mostCommon = '';
+    let maxCount = 0;
+    
+    for (const [sound, count] of Object.entries(frequency)) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostCommon = sound;
+      }
+    }
+    
+    console.log(`🧠 Most common result: "${mostCommon}" (${maxCount}/${this.allHeardSounds.length} occurrences)`);
+    
+    // If we have the expected letter, prioritize it if it appears at least once
+    if (frequency[this.currentCharacter] && frequency[this.currentCharacter] > 0) {
+      console.log(`🧠 Expected letter "${this.currentCharacter}" found in results, using it`);
+      return this.currentCharacter;
+    }
+    
+    return mostCommon;
+  }
+
   private checkAnswer(answer: string): boolean {
-    // Handle special prosigns with context awareness
+    // Handle special prosigns with context awareness - both should use same normalization
     const normalizedAnswer = this.normalizeAnswer(answer, this.currentCharacter);
-    const normalizedCurrent = this.normalizeAnswer(this.currentCharacter);
+    const normalizedCurrent = this.normalizeAnswer(this.currentCharacter, this.currentCharacter);
     
     console.log(`🎯 Checking: "${answer}" → "${normalizedAnswer}" vs expected "${this.currentCharacter}" → "${normalizedCurrent}"`);
-    return normalizedAnswer === normalizedCurrent;
+    const isMatch = normalizedAnswer === normalizedCurrent;
+    console.log(`🎯 Result: ${isMatch ? '✅ CORRECT' : '❌ INCORRECT'}`);
+    return isMatch;
   }
 
   private normalizeAnswer(text: string, expectedLetter?: string): string {
