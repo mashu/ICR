@@ -557,13 +557,15 @@ class VoiceICRApp {
           // Continue listening for confirmation in continuous mode
           this.elements.status.textContent = 'Say the letter again to confirm...';
           
-          // Set timeout for confirmation (8 seconds)
+          // Set timeout for confirmation (5 seconds - shorter for better responsiveness)
           this.confirmationTimeout = window.setTimeout(() => {
-            if (this.hasReceivedFirstResult && this.confirmationResults.length === 1) {
-              this.elements.transcription.innerHTML += `<br><em>Timeout - using first result</em>`;
+            if (this.hasReceivedFirstResult && this.confirmationResults.length >= 1) {
+              const firstResult = this.confirmationResults[0];
+              this.elements.transcription.innerHTML += `<br><em>⏱️ Timeout - using first result: ${firstResult}</em>`;
+              console.log('⏱️ Confirmation timeout - proceeding with first result');
               this.stopListening();
             }
-          }, 8000);
+          }, 5000);
         } else {
           // Subsequent results - for confirmation only (reprocess with context)
           const confirmedAnswer = this.normalizeAnswer(transcript, this.currentCharacter);
@@ -576,7 +578,9 @@ class VoiceICRApp {
             this.elements.transcription.textContent += `<br>Confirm: "${transcript}" (${Math.round(confidence * 100)}% confidence)`;
           }
           
-          // Check if we have consistent results
+          // Check if we have consistent results (with limits for rapid speech)
+          console.log(`📊 Confirmation status: ${this.confirmationResults.length} results so far`);
+          
           if (this.confirmationResults.length >= 2) {
             const firstResult = this.confirmationResults[0];
             const confirmedResults = this.confirmationResults.filter(r => r === firstResult);
@@ -584,13 +588,24 @@ class VoiceICRApp {
             if (confirmedResults.length >= 2) {
               this.elements.transcription.innerHTML += `<br><strong>✓ Confirmed: ${firstResult}</strong>`;
               clearTimeout(this.confirmationTimeout);
+              console.log('🎯 Confirmation achieved - stopping listening');
               this.stopListening();
             } else if (this.confirmationResults.length >= 3) {
               // Too many different results, stop and use first one
               this.elements.transcription.innerHTML += `<br><em>Using first result: ${firstResult}</em>`;
               clearTimeout(this.confirmationTimeout);
+              console.log('🚫 Too many conflicts - using first result');
               this.stopListening();
             }
+          }
+          
+          // Safety limit: if we get too many rapid confirmations, stop
+          if (this.confirmationResults.length >= 5) {
+            const firstResult = this.confirmationResults[0];
+            this.elements.transcription.innerHTML += `<br><em>⚡ Rapid speech detected - using first result: ${firstResult}</em>`;
+            clearTimeout(this.confirmationTimeout);
+            console.log('⚡ Rapid speech limit reached - stopping');
+            this.stopListening();
           }
         }
       } else {
@@ -820,6 +835,7 @@ class VoiceICRApp {
     console.log('Microphone permission granted:', this.isMicrophonePermissionGranted);
     console.log('Recognition object exists:', !!this.recognition);
     console.log('Currently listening:', this.isListening);
+    console.log('In confirmation mode:', this.hasReceivedFirstResult);
     
     if (!this.isMicrophonePermissionGranted) {
       this.elements.status.textContent = 'Please allow microphone access and refresh the page.';
@@ -834,6 +850,12 @@ class VoiceICRApp {
     // Check if recognition is already running
     if (this.isListening || this.isRecognitionStarting) {
       console.log('Recognition already running, skipping start');
+      return;
+    }
+    
+    // Don't restart during confirmation phase - let it continue
+    if (this.hasReceivedFirstResult && this.confirmationResults.length > 0) {
+      console.log('🔄 In confirmation phase, not restarting recognition');
       return;
     }
 
@@ -884,6 +906,7 @@ class VoiceICRApp {
 
   private stopListening(): void {
     console.log('stopListening called, isListening:', this.isListening);
+    console.log('Confirmation results:', this.confirmationResults.length);
     
     // Clear confirmation timeout
     if (this.confirmationTimeout) {
@@ -900,9 +923,20 @@ class VoiceICRApp {
         console.error('Error stopping recognition:', error);
       }
     }
+    
+    // Reset all recognition state
     this.isListening = false;
+    this.isRecognitionStarting = false;
     this.elements.voiceButton.textContent = 'Start Voice Input';
     this.elements.voiceButton.classList.remove('listening');
+    
+    // Schedule next character after stopping
+    if (this.hasReceivedFirstResult) {
+      console.log('🎯 Recognition stopped - moving to next character');
+      setTimeout(() => {
+        this.nextCharacter();
+      }, 1500);
+    }
   }
 
   private restartSpeechRecognition(): void {
