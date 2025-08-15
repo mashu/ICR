@@ -1298,8 +1298,8 @@ class VoiceICRApp {
   }
 
   private shouldEndLesson(): boolean {
-    // Check if all characters in current lesson have been practiced enough
-    const minAttempts = 5; // Minimum attempts per character
+    // Use same criteria as checkLessonCompletion to avoid conflicts
+    const minAttempts = 3; // Minimum attempts per character (same as checkLessonCompletion)
     const targetMedian = 2000; // Target response time in ms (2 seconds for green)
     
     for (const char of this.characterSet) {
@@ -1325,14 +1325,14 @@ class VoiceICRApp {
       this.calculateWeightedMedian(allTimings) : 0;
     
     this.elements.status.textContent = 
-      `🎉 Lesson Complete! Median response time: ${(overallMedian/1000).toFixed(1)}s. Ready for next lesson!`;
+      `🎉 Lesson Complete! Median response time: ${(overallMedian/1000).toFixed(1)}s. Auto-advancing...`;
     this.elements.status.className = 'correct';
     
     this.playCorrectSound();
     
-    // Suggest next lesson
+    // Auto-advance to next lesson (same as checkLessonCompletion)
     setTimeout(() => {
-      this.suggestNextLesson();
+      this.autoAdvanceLevel();
     }, 3000);
   }
 
