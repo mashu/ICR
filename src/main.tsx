@@ -435,7 +435,7 @@ class VoiceICRApp {
         const SpeechGrammarList = (window as any).webkitSpeechGrammarList || (window as any).SpeechGrammarList;
         const speechRecognitionList = new SpeechGrammarList();
         
-        // Grammar for alphabet letters and common phonetic words
+        // Grammar prioritizing single letters and common phonetic words
         const grammar = '#JSGF V1.0; grammar letters; public <letter> = ' +
           'a | alpha | ay | ace | ' +
           'b | bravo | bee | ' +
@@ -447,7 +447,7 @@ class VoiceICRApp {
           'h | hotel | aitch | ' +
           'i | india | ' +
           'j | juliet | jay | ' +
-          'k | kilo | kay | okay | ' +
+          'k | kilo | kay | ' +  // Removed 'okay' to avoid confusion
           'l | lima | el | ell | ' +
           'm | mike | em | emma | ' +
           'n | november | en | ' +
@@ -536,8 +536,8 @@ class VoiceICRApp {
       console.log('Transcript:', transcript, 'Confidence:', confidence, 'Final:', isFinal);
       
       if (isFinal) {
-        // Process final results
-        const normalizedAnswer = this.normalizeAnswer(transcript);
+        // Process final results with context
+        const normalizedAnswer = this.normalizeAnswer(transcript, this.currentCharacter);
         const showConversion = normalizedAnswer !== transcript;
         
         if (!this.hasReceivedFirstResult) {
@@ -565,11 +565,13 @@ class VoiceICRApp {
             }
           }, 8000);
         } else {
-          // Subsequent results - for confirmation only
-          this.confirmationResults.push(normalizedAnswer);
+          // Subsequent results - for confirmation only (reprocess with context)
+          const confirmedAnswer = this.normalizeAnswer(transcript, this.currentCharacter);
+          this.confirmationResults.push(confirmedAnswer);
           
-          if (showConversion) {
-            this.elements.transcription.textContent += `<br>Confirm: "${transcript}" → "${normalizedAnswer}" (${Math.round(confidence * 100)}% confidence)`;
+          const showConfirmConversion = confirmedAnswer !== transcript;
+          if (showConfirmConversion) {
+            this.elements.transcription.textContent += `<br>Confirm: "${transcript}" → "${confirmedAnswer}" (${Math.round(confidence * 100)}% confidence)`;
           } else {
             this.elements.transcription.textContent += `<br>Confirm: "${transcript}" (${Math.round(confidence * 100)}% confidence)`;
           }
@@ -961,14 +963,15 @@ class VoiceICRApp {
   }
 
   private checkAnswer(answer: string): boolean {
-    // Handle special prosigns
-    const normalizedAnswer = this.normalizeAnswer(answer);
+    // Handle special prosigns with context awareness
+    const normalizedAnswer = this.normalizeAnswer(answer, this.currentCharacter);
     const normalizedCurrent = this.normalizeAnswer(this.currentCharacter);
     
+    console.log(`🎯 Checking: "${answer}" → "${normalizedAnswer}" vs expected "${this.currentCharacter}" → "${normalizedCurrent}"`);
     return normalizedAnswer === normalizedCurrent;
   }
 
-  private normalizeAnswer(text: string): string {
+  private normalizeAnswer(text: string, expectedLetter?: string): string {
     // Convert common speech-to-text interpretations
     const conversions: { [key: string]: string } = {
       'EQUALS': '=',
@@ -1015,14 +1018,55 @@ class VoiceICRApp {
 
     let normalized = text.toUpperCase().trim();
     
-    // Check for phonetic conversions first
+    console.log(`🔍 Normalizing "${text}" (expected: ${expectedLetter || 'unknown'})`);
+    
+    // Context-aware processing: if we know what letter to expect, prioritize matches
+    if (expectedLetter) {
+      const expected = expectedLetter.toUpperCase();
+      
+      // Direct match - highest priority
+      if (normalized === expected) {
+        console.log(`✅ Direct match: "${normalized}" = ${expected}`);
+        return expected;
+      }
+      
+      // Check if the expected letter appears as a single letter in the text
+      const expectedMatch = new RegExp(`\\b${expected}\\b`);
+      if (expectedMatch.test(normalized)) {
+        console.log(`✅ Found expected letter "${expected}" in "${normalized}"`);
+        return expected;
+      }
+      
+      // For letter K specifically, handle common misrecognitions
+      if (expected === 'K') {
+        // "OKAY" often happens when saying "Kay" - prioritize K interpretation
+        if (normalized.includes('OKAY') || normalized.includes('KAY') || normalized.includes('OK')) {
+          console.log(`✅ K context: Converting "${normalized}" to K (expected K)`);
+          return 'K';
+        }
+      }
+      
+      // Similar context handling for other commonly confused letters
+      if (expected === 'A' && (normalized.includes('AY') || normalized.includes('ACE'))) {
+        console.log(`✅ A context: Converting "${normalized}" to A (expected A)`);
+        return 'A';
+      }
+      
+      if (expected === 'M' && (normalized.includes('EM') || normalized.includes('EMMA'))) {
+        console.log(`✅ M context: Converting "${normalized}" to M (expected M)`);
+        return 'M';
+      }
+    }
+    
+    // Check for phonetic conversions
     if (phoneticToLetter[normalized]) {
-      console.log(`Converted phonetic "${normalized}" to letter "${phoneticToLetter[normalized]}"`);
+      console.log(`📞 Phonetic conversion: "${normalized}" → "${phoneticToLetter[normalized]}"`);
       return phoneticToLetter[normalized];
     }
     
-    // Check for direct conversions
+    // Check for direct conversions (prosigns, etc.)
     if (conversions[normalized]) {
+      console.log(`🔄 Direct conversion: "${normalized}" → "${conversions[normalized]}"`);
       return conversions[normalized];
     }
     
@@ -1033,16 +1077,18 @@ class VoiceICRApp {
     
     // If it's already a single letter, return as-is
     if (normalized.length === 1 && /[A-Z0-9]/.test(normalized)) {
+      console.log(`🔤 Single letter: "${normalized}"`);
       return normalized;
     }
     
     // Try to extract single letters from mixed input
     const singleLetterMatch = normalized.match(/\b[A-Z]\b/);
     if (singleLetterMatch) {
-      console.log(`Extracted single letter "${singleLetterMatch[0]}" from "${normalized}"`);
+      console.log(`🎯 Extracted letter: "${singleLetterMatch[0]}" from "${normalized}"`);
       return singleLetterMatch[0];
     }
     
+    console.log(`❓ No conversion found for: "${normalized}"`);
     return normalized;
   }
 
