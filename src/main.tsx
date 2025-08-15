@@ -657,10 +657,10 @@ class VoiceICRApp {
           this.elements.status.textContent = 'Click voice button to restart or wait for auto-restart';
           // Auto-restart after 5 seconds for serious errors
           setTimeout(() => {
-            if (this.recognition && !this.isListening && this.recognition.state !== 'recording') {
-              console.log('Auto-restarting speech recognition after serious error');
-              this.startListening();
-            }
+                      if (this.recognition && !this.isListening) {
+            console.log('Auto-restarting speech recognition after serious error');
+            this.startListening();
+          }
           }, 3000);
         }, 2000);
       }
@@ -680,7 +680,7 @@ class VoiceICRApp {
         
         // Auto-restart after a longer delay to avoid conflicts
         setTimeout(() => {
-          if (this.recognition && !this.isListening && this.recognition.state !== 'recording') {
+          if (this.recognition && !this.isListening) {
             console.log('Auto-restarting speech recognition after unexpected end');
             this.startListening();
           }
@@ -853,7 +853,7 @@ class VoiceICRApp {
     // Check every 3 seconds if recognition is still active
     const checkInterval = setInterval(() => {
       // Only restart if we're not currently listening AND recognition object exists
-      if (!this.isListening && this.recognition && this.recognition.state !== 'recording') {
+      if (!this.isListening && this.recognition) {
         console.log('Persistent listening: Recognition stopped, restarting...');
         clearInterval(checkInterval);
         this.startListening();
@@ -875,13 +875,9 @@ class VoiceICRApp {
     
     if (this.recognition && this.isListening) {
       try {
-        // Check if recognition is actually running before trying to stop it
-        if (this.recognition.state === 'recording' || this.recognition.state === 'starting') {
-          this.recognition.stop();
-          console.log('Recognition stop called');
-        } else {
-          console.log('Recognition not running, skipping stop');
-        }
+        // Stop recognition
+        this.recognition.stop();
+        console.log('Recognition stop called');
       } catch (error) {
         console.error('Error stopping recognition:', error);
       }

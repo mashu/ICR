@@ -52,3 +52,7 @@ coverage/
 
 # Yarn Integrity file
 .yarn-integrity
+
+# SSL certificates
+cert.pem
+key.pem
